@@ -23,7 +23,7 @@ import (
 
 	"github.com/broxgit/log"
 	"github.com/broxgit/service/health"
-	otel "github.com/broxgit/service/internal/otel"
+	botel "github.com/broxgit/service/internal/otel"
 	prometheusmetrics "github.com/broxgit/service/metrics"
 )
 
@@ -42,6 +42,7 @@ type Tracker interface {
 type Source[T any] interface {
 	Messages(WorkGroup) iter.Seq2[T, Tracker]
 	health.NamedPinger
+	OnComplete(error)
 }
 
 // Handler defines a component responsible for processing messages of type T.
@@ -133,6 +134,9 @@ func (s *Service[_]) stop(work WorkGroup) {
 func (s *Service[T]) Start(parent context.Context) error {
 	ctx, cancel := NewSigContext(parent)
 	defer cancel()
+	defer func() {
+		s.OnComplete(nil)
+	}()
 
 	work := NewWorkGroup(ctx)
 	work.Add(s.conf.GoRoutines)
@@ -184,8 +188,8 @@ func (s *Service[T]) processMsg(msg T, tracker Tracker) {
 		ctx = tracker.Context()
 	}
 
-	ctx, span := s.getSpan(ctx)
-	defer span.End()
+	//ctx, span := s.getSpan(ctx)
+	//defer span.End()
 	handleTimer := prometheus.NewTimer(prometheusmetrics.HandleMessageTimerSeconds)
 	err := s.Handle(ctx, msg)
 	handleTimer.ObserveDuration()
@@ -197,7 +201,7 @@ func (s *Service[T]) processMsg(msg T, tracker Tracker) {
 	}
 	if err != nil && !errors.Is(err, context.Canceled) {
 		log.ZError("Error handling message", log.Z("err", err))
-		span.SetStatus(codes.Error, err.Error())
+		//span.SetStatus(codes.Error, err.Error())
 	}
 }
 
@@ -208,7 +212,7 @@ func (s *Service[T]) processMsg(msg T, tracker Tracker) {
 // See: https://github.com/open-telemetry/opentelemetry-go-contrib/issues/436
 func (s *Service[_]) getSpan(ctx context.Context) (context.Context, trace.Span) {
 	s.Do(func() {
-		otel.SetGlobalTracerProvider(ctx)
+		botel.SetGlobalTracerProvider(ctx)
 		s.tracer = otel.GetTracerProvider().Tracer("source.vivint.com/pl/service/v4/service")
 	})
 
